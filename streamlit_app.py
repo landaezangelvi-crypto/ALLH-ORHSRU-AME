@@ -1,119 +1,93 @@
 import streamlit as st
-from google import genai  # Nueva librería unificada de 2026
+from google import genai  # La nueva SDK unificada de 2026
 from fpdf import FPDF
 import json
 import re
 from datetime import datetime
 
-# --- CONFIGURACIÓN DE IDENTIDAD ---
+# --- IDENTIDAD ---
 FIRMA = "ALLH-ORH:2026"
 LEMA = '"No solo es querer salvar, sino saber salvar" Organización Rescate Humboldt.'
 
-# --- CONFIGURACIÓN DE IA (SDK 2026) ---
-# Inicializamos el cliente fuera de cualquier función para evitar errores de "not defined"
+# --- CONFIGURACIÓN DE IA ---
+# Definimos el cliente como None al inicio para evitar el error "name 'client' is not defined"
 client = None
 if "GENAI_API_KEY" in st.secrets:
     try:
-        # Se define el cliente GLOBALMENTE
         client = genai.Client(api_key=st.secrets["GENAI_API_KEY"])
-        MODELO_OPERATIVO = "gemini-2.5-flash" 
+        # Usamos Gemini 3 Flash que es el que tu panel muestra con cuota limpia
+        MODELO = "gemini-3-flash" 
     except Exception as e:
-        st.error(f"Error crítico de inicialización: {e}")
+        st.error(f"Error de inicialización de IA: {e}")
 else:
-    st.error("⚠️ Falta GENAI_API_KEY en los Secrets de Streamlit.")
+    st.warning("⚠️ IA Desconectada: Falta GENAI_API_KEY en los Secrets.")
 
-# --- GESTIÓN DE SESIÓN ---
-if 'march' not in st.session_state:
-    st.session_state.march = {k: "" for k in "MARCH"}
-if 'auth' not in st.session_state:
-    st.session_state.auth = False
+# --- ESTADO DE SESIÓN ---
+if 'march' not in st.session_state: st.session_state.march = {k: "" for k in "MARCH"}
+if 'auth' not in st.session_state: st.session_state.auth = False
 
-# --- CONTROL DE ACCESO ---
-st.set_page_config(page_title="ORH AME 4.0", layout="wide", page_icon="🚑")
+# --- INTERFAZ ---
+st.set_page_config(page_title="ORH AME 2026", layout="wide")
 
 if not st.session_state.auth:
-    st.title("🚑 Sistema AME - Rescate Humboldt")
-    with st.form("login"):
-        u = st.text_input("Usuario")
-        p = st.text_input("Contraseña", type="password")
-        if st.form_submit_button("ENTRAR"):
-            if u == "ORH2026" and p == "ORH2026":
-                st.session_state.auth = True
-                st.rerun()
-            else:
-                st.error("Acceso Denegado")
+    st.title("🚑 Acceso Operativo ORH")
+    if st.text_input("Credencial", type="password") == "ORH2026":
+        st.session_state.auth = True
+        st.rerun()
     st.stop()
 
-# --- INTERFAZ PRINCIPAL ---
 st.sidebar.title("SISTEMA ORH")
 st.sidebar.info(f"**{LEMA}**\n\nID: {FIRMA}")
 
-tab_ia, tab_march, tab_pdf = st.tabs(["💬 Consultor IA", "🩺 Protocolo MARCH", "📄 Informe"])
+tabs = st.tabs(["💬 Consultor IA", "🩺 MARCH", "📄 Informe"])
 
-with tab_ia:
-    st.subheader("Asesoría Médica en Tiempo Real")
+with tabs[0]:
+    st.subheader("Asesoría Médica Táctica")
     if "chat" not in st.session_state: st.session_state.chat = []
     
     for m in st.session_state.chat:
         with st.chat_message(m["role"]): st.markdown(m["content"])
 
-    if prompt := st.chat_input("Describa la situación..."):
-        st.session_state.chat.append({"role": "user", "content": prompt})
-        with st.chat_message("user"): st.markdown(prompt)
+    if q := st.chat_input("Describa situación..."):
+        st.session_state.chat.append({"role": "user", "content": q})
+        with st.chat_message("user"): st.markdown(q)
         
         with st.chat_message("assistant"):
             if client:
                 try:
-                    instruccion = f"Actúa como Asesor AME (ORH). Protocolos PHTLS/TCCC. Al final genera este JSON exacto: UPDATE_DATA: {{'march': {{'M': '...', 'A': '...', 'R': '...', 'C': '...', 'H': '...'}}}}"
-                    
-                    response = client.models.generate_content(
-                        model=MODELO_OPERATIVO,
-                        contents=[instruccion, prompt]
-                    )
-                    
-                    full_text = response.text
+                    prompt_instruccion = f"Actúa como Asesor AME ORH. Protocolos TCCC. Al final genera: UPDATE_DATA: {{'march': {{'M': '...', 'A': '...', 'R': '...', 'C': '...', 'H': '...'}}}}"
+                    response = client.models.generate_content(model=MODELO, contents=[prompt_instruccion, q])
                     
                     # Sincronización MARCH
-                    match = re.search(r"UPDATE_DATA:\s*(\{.*\})", full_text, re.DOTALL)
+                    match = re.search(r"UPDATE_DATA:\s*(\{.*\})", response.text, re.DOTALL)
                     if match:
                         try:
                             data = json.loads(match.group(1).replace("'", '"'))
                             for k in "MARCH":
-                                if data["march"].get(k) and data["march"][k] != "...":
-                                    st.session_state.march[k] = data["march"][k]
-                            st.toast("✅ Datos MARCH sincronizados")
+                                if data["march"].get(k): st.session_state.march[k] = data["march"][k]
+                            st.toast("✅ MARCH Actualizado")
                         except: pass
                     
-                    clean_text = re.sub(r"UPDATE_DATA:.*", "", full_text, flags=re.DOTALL)
-                    st.markdown(clean_text)
-                    st.session_state.chat.append({"role": "assistant", "content": clean_text})
+                    clean_res = re.sub(r"UPDATE_DATA:.*", "", response.text, flags=re.DOTALL)
+                    st.markdown(clean_res)
+                    st.session_state.chat.append({"role": "assistant", "content": clean_res})
                 except Exception as e:
-                    st.error(f"IA saturada o fuera de línea. (Detalle: {e})")
+                    st.error(f"IA Saturada. Proceda manualmente. (Error: {e})")
             else:
-                st.warning("IA no disponible por falta de llave de acceso.")
+                st.error("IA no disponible. Verifique su API Key en Secrets.")
 
-with tab_march:
-    st.subheader("Evaluación Primaria Táctica")
-    m_cols = st.columns(5)
+with tabs[1]:
+    st.subheader("Evaluación MARCH")
+    cols = st.columns(5)
     for i, k in enumerate("MARCH"):
-        st.session_state.march[k] = m_cols[i].text_input(k, st.session_state.march[k])
-    
-    if st.button("💾 Guardar Progreso"):
-        st.success("Información respaldada.")
+        st.session_state.march[k] = cols[i].text_input(k, st.session_state.march[k])
 
-with tab_pdf:
-    st.subheader("Generación de Documento")
-    fecha = datetime.now().strftime("%d/%m/%Y %H:%M")
-    reporte = f"REPORTE DE ATENCIÓN AME - ORH\nID: {FIRMA}\nFECHA: {fecha}\n\nRESULTADOS MARCH:\n"
-    for k, v in st.session_state.march.items():
-        reporte += f"- {k}: {v}\n"
-    reporte += f"\n{LEMA}"
-    
-    st.text_area("Vista Previa", reporte, height=250)
-    
-    if st.button("📥 Descargar Reporte PDF"):
+with tabs[2]:
+    st.subheader("Informe Final")
+    rep = f"REPORTE ORH - {datetime.now()}\n\nMARCH: {st.session_state.march}\n\n{FIRMA}"
+    st.text_area("Previsualización", rep, height=200)
+    if st.button("Descargar PDF"):
         pdf = FPDF()
-        pdf.add_page()
-        pdf.set_font("Arial", size=12)
-        pdf.multi_cell(0, 10, reporte.encode('latin-1', 'replace').decode('latin-1'))
-        st.download_button("Guardar PDF", data=bytes(pdf.output()), file_name="Reporte_ORH.pdf")
+        pdf.add_page(); pdf.set_font("Arial", size=12)
+        pdf.multi_cell(0, 10, rep.encode('latin-1', 'replace').decode('latin-1'))
+        st.download_button("Guardar Archivo", data=bytes(pdf.output()), file_name="Reporte_AME.pdf")
