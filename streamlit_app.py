@@ -1,104 +1,139 @@
 import streamlit as st
-import google.generativeai as genai
-import pandas as pd
+from google import genai
+from fpdf import FPDF
 import json
 import re
+import os
 from datetime import datetime
-from fpdf import FPDF
 
-# --- IDENTIDAD ---
+# --- 1. CONFIGURACIÓN INICIAL ---
+st.set_page_config(page_title="ORH - Asesor AME 2026", layout="wide", page_icon="🚑")
+
 FIRMA = "ALLH-ORH:2026"
 LEMA = '"No solo es querer salvar, sino saber salvar" Organización Rescate Humboldt.'
-COPYRIGHT = "ORH - DIVISIÓN DE ATENCIÓN MÉDICA DE EMERGENCIA (AME)"
+MODELO_ID = "gemini-2.0-flash"
 
-# --- CONFIGURACIÓN IA (GEMINI 3 FLASH) ---
-# Usamos el API Key que proporcionaste
-API_KEY = "AIzaSyBHWvkKJKIaWY1f9EX8ntCsBovLy-HYD8s"
-genai.configure(api_key=API_KEY)
-model = genai.GenerativeModel('gemini-3-flash')
-
-def consultar_ia(prompt):
-    instrucciones = f"""SISTEMA: Eres el Asesor AME de la ORH ({FIRMA}). 
-    Protocolos: PHTLS 10 y TCCC. Analiza riesgos climáticos y geográficos.
-    Al final de tu respuesta técnica, añade SIEMPRE este JSON:
-    UPDATE_DATA: {{"march": {{"M": "...", "A": "...", "R": "...", "C": "...", "H": "..."}}}}
-    CONSULTA: {prompt}"""
-    
+# --- 2. CONFIGURACIÓN DEL SDK (Gemini 2.0) ---
+client = None
+if "GENAI_API_KEY" in st.secrets:
     try:
-        # Configuración para permitir contenido médico de emergencia sin bloqueos
-        response = model.generate_content(
-            instrucciones,
-            safety_settings=[
-                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-            ]
-        )
-        return response.text
+        client = genai.Client(api_key=st.secrets["GENAI_API_KEY"])
     except Exception as e:
-        return f"⚠️ Error en el motor IA: {str(e)}. Por favor, proceda con el registro manual."
+        st.error(f"Error de conexión SDK: {e}")
+else:
+    st.error("⚠️ Falta GENAI_API_KEY en Secrets.")
 
-# --- ESTADO DE LA APP ---
-if 'auth' not in st.session_state: st.session_state.auth = False
-if 'stats' not in st.session_state: st.session_state.stats = {"Total": 0}
-if 'march' not in st.session_state: st.session_state.march = {k: "" for k in "MARCH"}
+# --- 3. INSTRUCCIONES DEL SISTEMA ---
+SYSTEM_INSTRUCTION = f"""
+Actúa como Asesor Táctico AME para la Organización Rescate Humboldt. Propiedad: {FIRMA}.
+Protocolos: PHTLS 10, TCCC y ATLS. 
+Al final de cada respuesta, incluye SIEMPRE:
+UPDATE_DATA: {{"march": {{"M": "...", "A": "...", "R": "...", "C": "...", "H": "..."}}}}
+"""
 
-# --- ACCESO ---
-st.set_page_config(page_title="ORH AME 2026", layout="wide")
+# --- 4. GESTIÓN DE SESIÓN ---
+if 'march' not in st.session_state:
+    st.session_state.march = {k: "" for k in "MARCH"}
+if 'auth' not in st.session_state:
+    st.session_state.auth = False
+if 'chat_history' not in st.session_state:
+    st.session_state.chat_history = []
+
+# --- 5. CONTROL DE ACCESO ---
 if not st.session_state.auth:
-    st.title("🚑 Acceso Operativo ORH")
-    if st.text_input("Credencial Operativa", type="password") == "ORH2026":
-        st.session_state.auth = True
-        st.rerun()
+    st.title("🚑 Acceso Operativo AME - ORH")
+    with st.form("login"):
+        u = st.text_input("Usuario")
+        p = st.text_input("Contraseña", type="password")
+        if st.form_submit_button("INGRESAR"):
+            if u == "ORH2026" and p == "ORH2026":
+                st.session_state.auth = True
+                st.rerun()
+            else:
+                st.error("Acceso Denegado")
     st.stop()
 
-# --- INTERFAZ ---
+# --- 6. INTERFAZ PRINCIPAL (Aquí se definen las pestañas correctamente) ---
 st.sidebar.title("SISTEMA ORH")
-st.sidebar.info(f"**{LEMA}**\n\nID: {FIRMA}")
+if os.path.exists("LOGO_ORH57.JPG"):
+    st.sidebar.image("LOGO_ORH57.JPG")
+st.sidebar.info(f"{LEMA}\n\nID: {FIRMA}")
 
-tabs = st.tabs(["💬 Consultor Táctico", "🩺 Protocolo MARCH", "📊 Estadísticas", "📄 Informe Final"])
+# DEFINICIÓN DE PESTAÑAS (Esto evita el NameError)
+t_reg, t_ia, t_pdf = st.tabs(["📋 Protocolo MARCH", "💬 Consultor IA", "📄 Informe"])
 
-with tabs[0]:
-    st.subheader("Asesoría Médica en Tiempo Real (Gemini 3)")
-    if "chat" not in st.session_state: st.session_state.chat = []
-    for m in st.session_state.chat:
-        with st.chat_message(m["role"]): st.markdown(m["content"])
+with t_reg:
+    st.subheader("Evaluación Primaria")
+    c1, c2 = st.columns(2)
+    # Usamos los valores de session_state para que la IA pueda escribirlos
+    m_val = c1.text_input("M (Hemorragia)", value=st.session_state.march["M"])
+    a_val = c1.text_input("A (Vía Aérea)", value=st.session_state.march["A"])
+    r_val = c2.text_input("R (Respiración)", value=st.session_state.march["R"])
+    c_val = c2.text_input("C (Circulación)", value=st.session_state.march["C"])
+    h_val = st.text_input("H (Hipotermia/Cabeza)", value=st.session_state.march["H"])
+    
+    # Actualizar estado si el usuario escribe manualmente
+    if st.button("Guardar Cambios Manuales"):
+        st.session_state.march = {"M": m_val, "A": a_val, "R": r_val, "C": c_val, "H": h_val}
+        st.success("Datos guardados.")
 
-    if q := st.chat_input("Describa la situación del paciente..."):
-        st.session_state.chat.append({"role": "user", "content": q})
-        with st.chat_message("user"): st.markdown(q)
+with t_ia:
+    st.subheader("💬 Consultor Táctico (Gemini 2.0)")
+    
+    # Mostrar historial de chat
+    for msg in st.session_state.chat_history:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    if prompt := st.chat_input("Escriba su consulta o reporte..."):
+        st.session_state.chat_history.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
         with st.chat_message("assistant"):
-            res = consultar_ia(q)
-            # Autollenado automático del MARCH
-            match = re.search(r"UPDATE_DATA:\s*(\{.*\})", res, re.DOTALL)
-            if match:
+            if client:
                 try:
-                    js = json.loads(match.group(1).replace("'", '"'))
-                    for k in "MARCH":
-                        if js["march"].get(k) and js["march"][k] != "...":
-                            st.session_state.march[k] = js["march"][k]
-                    st.toast("✅ Protocolo MARCH actualizado automáticamente")
-                except: pass
-            clean_res = re.sub(r"UPDATE_DATA:.*", "", res, flags=re.DOTALL)
-            st.markdown(clean_res)
-            st.session_state.chat.append({"role": "assistant", "content": clean_res})
+                    response = client.models.generate_content(
+                        model=MODELO_ID,
+                        config={'system_instruction': SYSTEM_INSTRUCTION},
+                        contents=prompt
+                    )
+                    full_res = response.text
+                    
+                    # Sincronización JSON para autollenado
+                    match = re.search(r"UPDATE_DATA:\s*(\{.*\})", full_res, re.DOTALL)
+                    if match:
+                        try:
+                            data = json.loads(match.group(1))
+                            if "march" in data:
+                                for k in "MARCH":
+                                    if data["march"].get(k):
+                                        st.session_state.march[k] = data["march"][k]
+                                st.rerun() # Recargamos para que se vean los cambios en la pestaña 1
+                        except: pass
+                    
+                    clean_res = re.sub(r"UPDATE_DATA:.*", "", full_res, flags=re.DOTALL)
+                    st.markdown(clean_res)
+                    st.session_state.chat_history.append({"role": "assistant", "content": clean_res})
+                
+                except Exception as e:
+                    if "429" in str(e):
+                        st.error("⏳ Límite excedido. Espere 60 segundos.")
+                    else:
+                        st.error(f"Fallo de IA: {e}")
+            else:
+                st.warning("IA no disponible.")
 
-with tabs[1]:
-    st.subheader("Registro MARCH")
-    m_cols = st.columns(5)
-    for i, k in enumerate("MARCH"):
-        st.session_state.march[k] = m_cols[i].text_input(k, st.session_state.march[k])
-    if st.button("💾 REGISTRAR CASO"):
-        st.session_state.stats["Total"] += 1
-        st.success("Caso contabilizado con éxito.")
-
-with tabs[3]:
-    st.subheader("Generación de Informe")
-    info = f"INFORME AME - ORH\nID: {FIRMA}\nFECHA: {datetime.now()}\n\nMARCH: {st.session_state.march}\n\n{LEMA}"
-    st.text_area("Vista Previa", info, height=200)
-    if st.button("📥 DESCARGAR PDF"):
+with t_pdf:
+    st.subheader("Informe Final")
+    fecha = datetime.now().strftime("%d/%m/%Y %H:%M")
+    reporte_txt = f"ORGANIZACIÓN RESCATE HUMBOLDT\nFECHA: {fecha}\n\nMARCH:\nM: {st.session_state.march['M']}\nA: {st.session_state.march['A']}\nR: {st.session_state.march['R']}\nC: {st.session_state.march['C']}\nH: {st.session_state.march['H']}\n\n{FIRMA}"
+    
+    st.text_area("Previsualización", reporte_txt, height=200)
+    
+    if st.button("Generar PDF"):
         pdf = FPDF()
         pdf.add_page()
         pdf.set_font("Arial", size=12)
-        pdf.multi_cell(0, 10, info.encode('latin-1', 'replace').decode('latin-1'))
-        st.download_button("Guardar en dispositivo", data=bytes(pdf.output()), file_name="Reporte_ORH.pdf")
-
-st.markdown(f"--- \n<center><small>{COPYRIGHT}<br>{FIRMA}</small></center>", unsafe_allow_html=True)
+        pdf.multi_cell(0, 10, reporte_txt.encode('latin-1', 'replace').decode('latin-1'))
+        st.download_button("Descargar", data=bytes(pdf.output()), file_name="Reporte_ORH.pdf")
