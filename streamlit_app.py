@@ -1,122 +1,97 @@
 import streamlit as st
-import google.generativeai as genai  # Usamos la librería estándar para mayor compatibilidad
+from google import genai  # IMPORTANTE: Esta es la nueva librería 2026
 from fpdf import FPDF
 import json
 import re
-import os
 from datetime import datetime
 
-# --- 1. CONFIGURACIÓN INICIAL ---
-st.set_page_config(page_title="ORH - Asesor AME 2026", layout="wide", page_icon="🚑")
+# --- CONFIGURACIÓN INICIAL ---
+st.set_page_config(page_title="ORH - AME 2026", layout="wide", page_icon="🚑")
 
 FIRMA = "ALLH-ORH:2026"
 LEMA = '"No solo es querer salvar, sino saber salvar" Organización Rescate Humboldt.'
-# CAMBIO CLAVE: Usamos 1.5 Flash para mayor estabilidad y cuota
-MODELO_ID = "gemini-1.5-flash" 
 
-# --- 2. CONFIGURACIÓN DE LA IA ---
+# --- INICIALIZACIÓN DE LA IA (NUEVA SDK) ---
 if "GENAI_API_KEY" in st.secrets:
-    genai.configure(api_key=st.secrets["GENAI_API_KEY"])
-    model = genai.GenerativeModel(
-        model_name=MODELO_ID,
-        system_instruction=f"Actúa como Asesor Táctico AME para la Organización Rescate Humboldt. Propiedad: {FIRMA}. Protocolos: PHTLS 10, TCCC. Al final incluye: UPDATE_DATA: {{'march': {{'M': '...', 'A': '...', 'R': '...', 'C': '...', 'H': '...'}}}}"
-    )
+    try:
+        # La nueva forma de conectar en 2026
+        client = genai.Client(api_key=st.secrets["GENAI_API_KEY"])
+        MODELO_ACTUAL = "gemini-2.5-flash" 
+    except Exception as e:
+        st.error(f"Error de conexión con el cliente IA: {e}")
 else:
-    st.error("⚠️ Falta GENAI_API_KEY en Secrets.")
+    st.error("⚠️ Falta GENAI_API_KEY en los Secrets de Streamlit.")
 
-# --- 3. GESTIÓN DE SESIÓN ---
+# --- GESTIÓN DE DATOS ---
 if 'march' not in st.session_state:
     st.session_state.march = {k: "" for k in "MARCH"}
 if 'auth' not in st.session_state:
     st.session_state.auth = False
-if 'chat_history' not in st.session_state:
-    st.session_state.chat_history = []
 
-# --- 4. CONTROL DE ACCESO ---
+# --- ACCESO ---
 if not st.session_state.auth:
-    st.title("🚑 Acceso Operativo AME - ORH")
-    with st.form("login"):
-        u = st.text_input("Usuario")
-        p = st.text_input("Contraseña", type="password")
-        if st.form_submit_button("INGRESAR"):
-            if u == "ORH2026" and p == "ORH2026":
-                st.session_state.auth = True
-                st.rerun()
-            else:
-                st.error("Acceso Denegado")
+    st.title("🚑 Acceso Operativo ORH")
+    if st.text_input("Credencial", type="password") == "ORH2026":
+        st.session_state.auth = True
+        st.rerun()
     st.stop()
 
-# --- 5. INTERFAZ PRINCIPAL ---
+# --- INTERFAZ ---
 st.sidebar.title("SISTEMA ORH")
 st.sidebar.info(f"{LEMA}\n\nID: {FIRMA}")
 
-t_reg, t_ia, t_pdf = st.tabs(["📋 Protocolo MARCH", "💬 Consultor IA", "📄 Informe"])
+tabs = st.tabs(["💬 Consultor IA", "🩺 MARCH", "📄 Informe"])
 
-with t_reg:
-    st.subheader("Evaluación Primaria")
-    # Formulario dinámico sincronizado con la IA
-    c1, c2 = st.columns(2)
-    m_val = c1.text_input("M (Hemorragia)", value=st.session_state.march["M"])
-    a_val = c1.text_input("A (Vía Aérea)", value=st.session_state.march["A"])
-    r_val = c2.text_input("R (Respiración)", value=st.session_state.march["R"])
-    c_val = c2.text_input("C (Circulación)", value=st.session_state.march["C"])
-    h_val = st.text_input("H (Hipotermia/Cabeza)", value=st.session_state.march["H"])
+with tabs[0]:
+    st.subheader("Asesoría Médica (Gemini 2.5 Flash)")
+    if "chat" not in st.session_state: st.session_state.chat = []
     
-    if st.button("Guardar Cambios Manuales"):
-        st.session_state.march = {"M": m_val, "A": a_val, "R": r_val, "C": c_val, "H": h_val}
-        st.success("Datos guardados.")
+    for m in st.session_state.chat:
+        with st.chat_message(m["role"]): st.markdown(m["content"])
 
-with t_ia:
-    st.subheader("💬 Consultor Táctico (Gemini 1.5 Estabilidad)")
-    
-    for msg in st.session_state.chat_history:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-
-    if prompt := st.chat_input("Escriba su consulta o reporte..."):
-        st.session_state.chat_history.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
-
+    if q := st.chat_input("Consulta operativa..."):
+        st.session_state.chat.append({"role": "user", "content": q})
+        with st.chat_message("user"): st.markdown(q)
+        
         with st.chat_message("assistant"):
             try:
-                # Usamos una configuración que ignora bloqueos de seguridad por términos médicos
-                response = model.generate_content(
-                    prompt,
-                    safety_settings={
-                        "HARM_CATEGORY_DANGEROUS_CONTENT": "BLOCK_NONE",
-                    }
+                # Instrucción de sistema integrada en la llamada (Nueva SDK)
+                response = client.models.generate_content(
+                    model=MODELO_ACTUAL,
+                    contents=f"Actúa como Asesor Táctico AME (ORH). Protocolos PHTLS/TCCC. Al final genera este JSON: UPDATE_DATA: {{'march': {{'M': '...', 'A': '...', 'R': '...', 'C': '...', 'H': '...'}}}}. CONSULTA: {q}"
                 )
-                full_res = response.text
+                res_text = response.text
                 
-                # Extracción de datos para la pestaña MARCH
-                match = re.search(r"UPDATE_DATA:\s*(\{.*\})", full_res, re.DOTALL)
+                # Lógica de autollenado MARCH
+                match = re.search(r"UPDATE_DATA:\s*(\{.*\})", res_text, re.DOTALL)
                 if match:
                     try:
-                        # Reemplazamos comillas simples por dobles para JSON válido
-                        json_str = match.group(1).replace("'", '"')
-                        data = json.loads(json_str)
+                        data = json.loads(match.group(1).replace("'", '"'))
                         for k in "MARCH":
                             if data["march"].get(k) and data["march"][k] != "...":
                                 st.session_state.march[k] = data["march"][k]
-                        st.toast("✅ Datos MARCH actualizados")
+                        st.toast("✅ MARCH actualizado")
                     except: pass
                 
-                clean_res = re.sub(r"UPDATE_DATA:.*", "", full_res, flags=re.DOTALL)
-                st.markdown(clean_res)
-                st.session_state.chat_history.append({"role": "assistant", "content": clean_res})
-                
+                clean_txt = re.sub(r"UPDATE_DATA:.*", "", res_text, flags=re.DOTALL)
+                st.markdown(clean_txt)
+                st.session_state.chat.append({"role": "assistant", "content": clean_txt})
             except Exception as e:
-                st.error(f"⚠️ El servicio está saturado. Por favor, espere unos segundos. (Error: {e})")
+                st.error(f"⚠️ Error: {e}")
 
-with t_pdf:
+with tabs[1]:
+    st.subheader("Protocolo MARCH")
+    cols = st.columns(5)
+    for i, k in enumerate("MARCH"):
+        st.session_state.march[k] = cols[i].text_input(k, st.session_state.march[k])
+
+with tabs[2]:
     st.subheader("Informe Final")
-    reporte_txt = f"ORGANIZACIÓN RESCATE HUMBOLDT\nFECHA: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\nMARCH:\nM: {st.session_state.march['M']}\nA: {st.session_state.march['A']}\nR: {st.session_state.march['R']}\nC: {st.session_state.march['C']}\nH: {st.session_state.march['H']}\n\n{FIRMA}"
-    st.text_area("Vista Previa", reporte_txt, height=200)
-    
-    if st.button("Generar PDF"):
+    reporte = f"REPORTE ORH - {FIRMA}\nFECHA: {datetime.now()}\n\nMARCH: {st.session_state.march}\n\n{LEMA}"
+    st.text_area("Vista Previa", reporte, height=200)
+    if st.button("Descargar PDF"):
         pdf = FPDF()
         pdf.add_page()
-        pdf.set_font("Arial", size=12)
-        pdf.multi_cell(0, 10, reporte_txt.encode('latin-1', 'replace').decode('latin-1'))
-        st.download_button("Descargar", data=bytes(pdf.output()), file_name="Reporte_ORH.pdf")
+        pdf.set_font("Arial", size=11)
+        pdf.multi_cell(0, 10, reporte)
+        st.download_button("Guardar", data=bytes(pdf.output()), file_name="Reporte_ORH.pdf")
