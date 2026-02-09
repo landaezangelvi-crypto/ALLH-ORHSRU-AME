@@ -14,8 +14,9 @@ LEMA = '"No solo es querer salvar, sino saber salvar" Organización Rescate Humb
 client = None
 if "GENAI_API_KEY" in st.secrets:
     try:
+        # Se define el cliente GLOBALMENTE
         client = genai.Client(api_key=st.secrets["GENAI_API_KEY"])
-        MODELO_OPERATIVO = "gemini-2.5-flash" # Tu panel muestra que este tiene cuota disponible
+        MODELO_OPERATIVO = "gemini-2.5-flash" 
     except Exception as e:
         st.error(f"Error crítico de inicialización: {e}")
 else:
@@ -33,11 +34,14 @@ st.set_page_config(page_title="ORH AME 4.0", layout="wide", page_icon="🚑")
 if not st.session_state.auth:
     st.title("🚑 Sistema AME - Rescate Humboldt")
     with st.form("login"):
-        if st.text_input("Credencial Operativa", type="password") == "ORH2026":
-            if st.form_submit_button("ENTRAR"):
+        u = st.text_input("Usuario")
+        p = st.text_input("Contraseña", type="password")
+        if st.form_submit_button("ENTRAR"):
+            if u == "ORH2026" and p == "ORH2026":
                 st.session_state.auth = True
                 st.rerun()
-        else: st.form_submit_button("ENTRAR")
+            else:
+                st.error("Acceso Denegado")
     st.stop()
 
 # --- INTERFAZ PRINCIPAL ---
@@ -60,8 +64,7 @@ with tab_ia:
         with st.chat_message("assistant"):
             if client:
                 try:
-                    # Instrucciones del sistema integradas en la llamada para evitar bloqueos
-                    instruccion = f"Actúa como Asesor AME (ORH). Protocolos PHTLS/TCCC. Responde técnico y breve. Al final genera este JSON exacto: UPDATE_DATA: {{'march': {{'M': '...', 'A': '...', 'R': '...', 'C': '...', 'H': '...'}}}}"
+                    instruccion = f"Actúa como Asesor AME (ORH). Protocolos PHTLS/TCCC. Al final genera este JSON exacto: UPDATE_DATA: {{'march': {{'M': '...', 'A': '...', 'R': '...', 'C': '...', 'H': '...'}}}}"
                     
                     response = client.models.generate_content(
                         model=MODELO_OPERATIVO,
@@ -85,7 +88,7 @@ with tab_ia:
                     st.markdown(clean_text)
                     st.session_state.chat.append({"role": "assistant", "content": clean_text})
                 except Exception as e:
-                    st.error(f"IA temporalmente fuera de línea. Use llenado manual. (Detalle: {e})")
+                    st.error(f"IA saturada o fuera de línea. (Detalle: {e})")
             else:
                 st.warning("IA no disponible por falta de llave de acceso.")
 
@@ -93,10 +96,10 @@ with tab_march:
     st.subheader("Evaluación Primaria Táctica")
     m_cols = st.columns(5)
     for i, k in enumerate("MARCH"):
-        st.session_state.march[k] = m_cols[i].text_input(k, st.session_state.march[k], help=f"Fase {k} del protocolo")
+        st.session_state.march[k] = m_cols[i].text_input(k, st.session_state.march[k])
     
     if st.button("💾 Guardar Progreso"):
-        st.success("Información respaldada en la sesión.")
+        st.success("Información respaldada.")
 
 with tab_pdf:
     st.subheader("Generación de Documento")
@@ -113,4 +116,4 @@ with tab_pdf:
         pdf.add_page()
         pdf.set_font("Arial", size=12)
         pdf.multi_cell(0, 10, reporte.encode('latin-1', 'replace').decode('latin-1'))
-        st.download_button("Guardar PDF", data=bytes(pdf.output()), file_name=f"ORH_AME_{datetime.now().strftime('%H%M%S')}.pdf")
+        st.download_button("Guardar PDF", data=bytes(pdf.output()), file_name="Reporte_ORH.pdf")
