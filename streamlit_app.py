@@ -6,13 +6,21 @@ from datetime import datetime
 from PIL import Image
 import requests
 
-# --- 1. CONFIGURACIÓN E IDENTIDAD ---
-st.set_page_config(page_title="ORH - AME Táctico Legal", layout="wide", page_icon="🚑")
+# --- 1. CONFIGURACIÓN E IDENTIDAD VISUAL ---
+st.set_page_config(page_title="ORH - AME Táctico 10.0", layout="wide", page_icon="🚑")
+
+# Estilo personalizado para una interfaz más limpia y profesional
+st.markdown("""
+    <style>
+    .stApp { background-color: #0e1117; color: #ffffff; }
+    .stChatFloatingInputContainer { bottom: 20px; }
+    .reportview-container .main .block-container { padding-top: 2rem; }
+    </style>
+    """, unsafe_allow_html=True)
 
 FIRMA = "ALLH-ORH:2026"
 LEMA = '"No solo es querer salvar, sino saber salvar" Organización Rescate Humboldt.'
 COPYRIGHT_FULL = "ORGANIZACIÓN RESCATE HUMBOLDT - COORDINACIÓN DE RECURSOS HUMANOS - DIVISIÓN DE ATENCIÓN MÉDICA DE EMERGENCIA - (ALLH-ORH:2026)"
-
 LOGO_URL = "https://upload.wikimedia.org/wikipedia/commons/thumb/8/82/Gnome-medical-emergency.svg/1024px-Gnome-medical-emergency.svg.png"
 
 # --- 2. CONTROL DE ACCESO ---
@@ -21,7 +29,7 @@ if 'auth' not in st.session_state: st.session_state.auth = False
 if not st.session_state.auth:
     st.title("🚑 Sistema Táctico AME - ORH")
     c1, c2 = st.columns([1, 2])
-    with c1: st.image(LOGO_URL, width=100)
+    with c1: st.image(LOGO_URL, width=120)
     with c2:
         with st.form("login"):
             st.markdown("### Credenciales Operativas")
@@ -34,33 +42,32 @@ if not st.session_state.auth:
                 else: st.error("Acceso no autorizado.")
     st.stop()
 
-# --- 3. CONEXIÓN NEURONAL ---
+# --- 3. CONEXIÓN NEURONAL (IA) ---
 client = None
 if "GENAI_API_KEY" in st.secrets:
     try:
         client = genai.Client(api_key=st.secrets["GENAI_API_KEY"])
-        MODELO = "gemini-2.5-flash"
+        MODELO = "gemini-2.0-flash" # Versión optimizada para razonamiento rápido
     except Exception as e: st.error(f"Error IA: {e}")
 
-# --- 4. PROMPT DE PRECISIÓN TÁCTICA Y LEGAL (ACTUALIZADO) ---
+# --- 4. PROMPT MAESTRO (CONSOLIDADO) ---
 SYSTEM_PROMPT = f"""
-ACTÚA COMO: Oficial Médico/SAR de la Organización Rescate Humboldt (ORH).
-PROPIEDAD: {FIRMA}.
+ROL: Oficial Médico y SAR de la Organización Rescate Humboldt (ORH). {FIRMA}
+FUENTES: PHTLS 10ma Ed (2025-2026), TECC/TCCC, ACLS/BLS AHA 2024, ATLS, Código Penal Ven, Ley Ejercicio Medicina Ven, Deontología de Enfermería Ven, Estatutos ORH.
 
-FUENTES DE REFERENCIA OBLIGATORIAS:
-- Clínicas: PHTLS 10ma Ed (2025-2026), TECC/TCCC, AHA 2024 (Drowning), ACLS/BLS.
-- Legales Ven: Código Penal (Omisión de Socorro), Ley del Ejercicio de la Medicina, Código de Deontología de Enfermería, LOPCYMAT y Estatutos ORH.
+REGLAS DE ORO:
+1. AMIGABILIDAD PROFESIONAL: Saluda al operador ("Entendido, Operador"). Sé asertivo y práctico.
+2. NO REDUNDANCIA: No expliques técnicas básicas a menos que haya dudas o se te pida explícitamente.
+3. PRECISIÓN CLÍNICA: Solo recomienda sobre base de evidencia (signos/síntomas reportados).
+4. INTELIGENCIA DE TERRENO (OBLIGATORIO): Si se da una ubicación, detalla obligatoriamente:
+   - Geografía (Riesgos de terreno).
+   - Hidrología/Clima (Crecidas, pronóstico).
+   - Fauna/Flora (Amenazas biológicas).
+   - Recursos Naturales (Supervivencia/Pernocta).
+5. MARCO LEGAL: Advierte sobre atribuciones legales según la ley venezolana si el procedimiento es invasivo.
+6. FASES: Care Under Fire -> Tactical Field Care -> TACEVAC.
 
-REGLAS DE INTERACCIÓN:
-1. PRECISIÓN AMIGABLE: Sé cordial con el operador ("Entendido, Operador", "Proceda con precaución").
-2. NO ASUMIR: Si no hay evidencia de signos (TA, FC, FR, SPO2) o síntomas, NO des recomendaciones farmacológicas.
-3. MARCO LEGAL: Si una acción sugerida tiene implicaciones legales (ej. realizar una cricotiroidotomía sin ser personal médico), advierte al operador sobre el límite de sus atribuciones según la ley venezolana.
-4. ESTRUCTURA POR FASES:
-   - FASE 1: Amenaza Directa (Care Under Fire).
-   - FASE 2: Campo Táctico (MARCH).
-   - FASE 3: Evacuación (TACEVAC).
-
-FINALIZACIÓN: Todas las respuestas deben cerrar estrictamente con: {LEMA}
+CIERRE: {LEMA}
 
 SALIDA JSON (INVISIBLE):
 UPDATE_DATA: {{
@@ -70,35 +77,33 @@ UPDATE_DATA: {{
 }}
 """
 
-# --- 5. ESTADO DE SESIÓN ---
-vars_default = {
-    "operador": "", "paciente": "", "ubicacion": "", "tipo_incidente": "Terrestre", 
-    "hora": datetime.now().strftime('%H:%M'), "farmaco": "", 
-    "M":"", "A":"", "R":"", "C":"", "H":""
-}
-for k, v in vars_default.items():
-    if k not in st.session_state: st.session_state[k] = v
+# --- 5. GESTIÓN DE ESTADO ---
+vars_list = ["operador", "paciente", "ubicacion", "tipo_incidente", "hora", "farmaco", "M", "A", "R", "C", "H"]
+for v in vars_list:
+    if v not in st.session_state:
+        st.session_state[v] = "Terrestre" if v == "tipo_incidente" else (datetime.now().strftime('%H:%M') if v == "hora" else "")
 
 if 'chat' not in st.session_state: st.session_state.chat = []
 
-# --- 6. GENERADOR DE PDF INSTITUCIONAL ---
-class ORHPDF(FPDF):
+# --- 6. CLASE PDF INSTITUCIONAL ---
+class ORH_Report(FPDF):
     def header(self):
-        try: self.image("logo_temp.png", 10, 8, 20)
+        try: self.image("logo_temp.png", 10, 8, 22)
         except: pass
-        self.set_font('Arial', 'B', 12)
-        self.cell(0, 5, 'ORGANIZACIÓN RESCATE HUMBOLDT', 0, 1, 'C')
-        self.set_font('Arial', '', 9)
-        self.cell(0, 5, 'DIVISIÓN DE ATENCIÓN MÉDICA DE EMERGENCIA', 0, 1, 'C')
-        self.ln(10)
+        self.set_font('Arial', 'B', 14)
+        self.cell(0, 7, 'ORGANIZACIÓN RESCATE HUMBOLDT', 0, 1, 'C')
+        self.set_font('Arial', '', 10)
+        self.cell(0, 5, 'DIVISIÓN DE ATENCIÓN MÉDICA DE EMERGENCIA (AME)', 0, 1, 'C')
+        self.set_draw_color(200, 0, 0)
+        self.line(10, 32, 200, 32)
+        self.ln(12)
 
     def footer(self):
-        self.set_y(-22)
-        self.set_font('Arial', 'I', 6)
-        # Copyright solicitado
+        self.set_y(-25)
+        self.set_font('Arial', 'I', 7)
         self.multi_cell(0, 4, f"{COPYRIGHT_FULL}\n{LEMA}", 0, 'C')
 
-# --- 7. INTERFAZ ---
+# --- 7. INTERFAZ OPERATIVA ---
 logo_path = "logo_temp.png"
 if not os.path.exists(logo_path):
     try:
@@ -106,37 +111,37 @@ if not os.path.exists(logo_path):
         with open(logo_path, 'wb') as f: f.write(r.content)
     except: pass
 
-st.sidebar.title("SISTEMA ORH - AME")
-st.sidebar.image(LOGO_URL, width=80)
-st.sidebar.info(f"**ID OPERATIVO:** {FIRMA}")
+st.sidebar.title("SISTEMA CENTINELA")
+st.sidebar.image(LOGO_URL, width=100)
+st.sidebar.markdown(f"**ID:** {FIRMA}")
+st.sidebar.markdown("---")
 
-tab1, tab2, tab3 = st.tabs(["💬 CONSULTOR TÁCTICO", "📋 REGISTRO DE CAMPO", "📄 INFORME PDF"])
+tab1, tab2, tab3 = st.tabs(["💬 CONSULTOR TÁCTICO", "📋 FICHA TÉCNICA", "📄 INFORME OFICIAL"])
 
 with tab1:
-    st.write("### Centro de Mando e IA")
+    st.subheader("Interacción y Asesoría AME")
     for m in st.session_state.chat:
         with st.chat_message(m["role"]): st.markdown(m["content"])
     
-    if q := st.chat_input("Operador, describa la situación actual..."):
+    if q := st.chat_input("Operador, ingrese reporte de situación o ubicación..."):
         st.session_state.chat.append({"role": "user", "content": q})
         with st.chat_message("user"): st.markdown(q)
         
         with st.chat_message("assistant"):
             if client:
-                with st.spinner("Consultando protocolos y marco legal..."):
+                with st.spinner("Procesando inteligencia..."):
                     res = client.models.generate_content(model=MODELO, contents=[SYSTEM_PROMPT, q])
                     full_text = res.text
                     
-                    # Motor de Autollenado invisible
+                    # Extracción de datos para autollenado
                     match = re.search(r"UPDATE_DATA:\s*(\{.*\})", full_text, re.DOTALL)
                     if match:
                         try:
                             js = json.loads(match.group(1).replace("'", '"'))
-                            for cat in ["info", "march"]:
-                                for k, v in js[cat].items():
+                            for key in ["info", "march"]:
+                                for k, v in js[key].items():
                                     if v and v != "...": st.session_state[k] = v
                             if js.get("farmaco"): st.session_state["farmaco"] = js["farmaco"]
-                            st.toast("Datos sincronizados con la ficha")
                         except: pass
 
                     clean_res = re.sub(r"UPDATE_DATA:.*", "", full_text, flags=re.DOTALL)
@@ -144,56 +149,21 @@ with tab1:
                     st.session_state.chat.append({"role": "assistant", "content": clean_res})
 
 with tab2:
-    st.subheader("Ficha de Atención Prehospitalaria")
-    c1, c2 = st.columns(2)
-    st.session_state["operador"] = c1.text_input("Operador SAR/APH", st.session_state["operador"])
-    st.session_state["paciente"] = c2.text_input("Identificación Paciente", st.session_state["paciente"])
+    st.subheader("Registro de Campo")
+    c1, c2, c3 = st.columns(3)
+    st.session_state["operador"] = c1.text_input("Operador SAR", st.session_state["operador"])
+    st.session_state["paciente"] = c2.text_input("Paciente", st.session_state["paciente"])
+    st.session_state["ubicacion"] = c3.text_input("Ubicación/COORD", st.session_state["ubicacion"])
     
-    st.markdown("**Evaluación Primaria (Protocolo MARCH)**")
+    st.markdown("### Evaluación Primaria (MARCH)")
+    
     m_cols = st.columns(5)
-    labels = ["M (Hemorragia)", "A (Vía Aérea)", "R (Respiración)", "C (Circulación)", "H (Hipotermia)"]
     keys = ["M", "A", "R", "C", "H"]
     for i, k in enumerate(keys):
-        st.session_state[k] = m_cols[i].text_area(labels[i], st.session_state[k], height=100)
+        st.session_state[k] = m_cols[i].text_area(k, st.session_state[k], height=120)
     
-    st.session_state["farmaco"] = st.text_area("Terapéutica, Fármacos y Observaciones Legales", st.session_state["farmaco"])
+    st.session_state["farmaco"] = st.text_area("Análisis de Riesgo y Terapéutica", st.session_state["farmaco"])
 
 with tab3:
-    st.subheader("Generación de Informe Institucional")
-    st.info("Este informe cumple con los estándares de la ORH y sirve como respaldo de la actuación realizada.")
-    
-    
-
-    if st.button("🖨️ GENERAR INFORME PDF"):
-        pdf = ORHPDF()
-        pdf.add_page()
-        pdf.set_font('Arial', 'B', 10)
-        pdf.cell(0, 10, f"REGISTRO DE INCIDENTE - FECHA: {datetime.now().strftime('%d/%m/%Y')} | HORA: {st.session_state['hora']}", 1, 1, 'C')
-        
-        pdf.ln(5)
-        pdf.set_font('Arial', 'B', 10)
-        pdf.cell(0, 6, "1. IDENTIFICACIÓN", 0, 1)
-        pdf.set_font('Arial', '', 9)
-        pdf.multi_cell(0, 5, f"Operador: {st.session_state['operador']}\nUbicación: {st.session_state['ubicacion']}\nPaciente: {st.session_state['paciente']}")
-        
-        pdf.ln(5)
-        pdf.set_font('Arial', 'B', 10)
-        pdf.cell(0, 6, "2. HALLAZGOS CLÍNICOS (MARCH)", 0, 1)
-        pdf.set_font('Arial', '', 9)
-        march_full = f"M: {st.session_state['M']}\nA: {st.session_state['A']}\nR: {st.session_state['R']}\nC: {st.session_state['C']}\nH: {st.session_state['H']}"
-        pdf.multi_cell(0, 5, march_full.encode('latin-1', 'replace').decode('latin-1'))
-        
-        pdf.ln(5)
-        pdf.set_font('Arial', 'B', 10)
-        pdf.cell(0, 6, "3. INTERVENCIONES Y TRATAMIENTO", 0, 1)
-        pdf.set_font('Arial', '', 9)
-        pdf.multi_cell(0, 5, st.session_state['farmaco'].encode('latin-1', 'replace').decode('latin-1'))
-        
-        pdf.ln(10)
-        pdf.set_font('Arial', 'I', 8)
-        pdf.multi_cell(0, 4, "Aviso Legal: Las actuaciones descritas se basan en protocolos internacionales y nacionales de atención de emergencias. Este reporte es confidencial y para uso exclusivo de la ORH.")
-        
-        output = pdf.output()
-        st.download_button("⬇️ DESCARGAR INFORME OFICIAL ORH", data=bytes(output), file_name=f"Informe_ORH_AME_{datetime.now().strftime('%H%M')}.pdf")
-
-st.markdown(f"--- \n<center><small>{COPYRIGHT_FULL}</small></center>", unsafe_allow_html=True)
+    st.subheader("Gestión de Informe Institucional")
+    st.info("
