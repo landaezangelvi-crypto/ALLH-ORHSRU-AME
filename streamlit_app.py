@@ -6,9 +6,12 @@ from datetime import datetime
 from PIL import Image
 
 # --- 1. CONFIGURACIÓN E IDENTIDAD ---
-st.set_page_config(page_title="ORH - AME Táctico 6.0", layout="wide", page_icon="🚑")
+st.set_page_config(page_title="ORH - AME Táctico 6.1", layout="wide", page_icon="🚑")
+
+# --- VARIABLES GLOBALES (AQUÍ ESTABA EL ERROR) ---
 FIRMA = "ALLH-ORH:2026"
 LEMA = '"No solo es querer salvar, sino saber salvar" Organización Rescate Humboldt.'
+COPYRIGHT = "ORGANIZACIÓN RESCATE HUMBOLDT - DIVISIÓN DE ATENCIÓN MÉDICA DE EMERGENCIA (AME)"
 
 # --- 2. CONTROL DE ACCESO ---
 if 'auth' not in st.session_state: st.session_state.auth = False
@@ -38,7 +41,6 @@ if "GENAI_API_KEY" in st.secrets:
     except Exception as e: st.error(f"Error IA: {e}")
 
 # --- 4. INSTRUCCIÓN MAESTRA (PROMPT) ---
-# Aquí definimos que la IA extraiga ABSOLUTAMENTE TODO
 SYSTEM_PROMPT = f"""
 ROL: Asesor Táctico AME - Organización Rescate Humboldt ({FIRMA}).
 OBJETIVO: Analizar texto e imágenes para llenar automáticamente el reporte operativo.
@@ -66,7 +68,6 @@ UPDATE_DATA: {{
 """
 
 # --- 5. GESTIÓN DE MEMORIA (SESSION STATE) ---
-# Inicializamos todas las variables para que los campos de texto las lean
 vars_default = {
     "operador": "", "paciente": "", "ubicacion": "", "tipo_incidente": "Terrestre", 
     "hora": datetime.now().strftime('%H:%M'), "farmaco": "", "M":"", "A":"", "R":"", "C":"", "H":""
@@ -80,7 +81,7 @@ if 'chat' not in st.session_state: st.session_state.chat = []
 st.sidebar.title("SISTEMA ORH")
 st.sidebar.info(f"**ID:** {FIRMA}\n\n{LEMA}")
 
-# Módulo de Carga de Imágenes (SIDEBAR para acceso rápido)
+# Módulo de Carga de Imágenes (SIDEBAR)
 st.sidebar.markdown("### 📸 Ojos Tácticos")
 foto = st.sidebar.file_uploader("Cargar evidencia", type=['jpg', 'png', 'jpeg'])
 img_pil = None
@@ -94,11 +95,9 @@ tab1, tab2, tab3 = st.tabs(["💬 CENTRO DE MANDO (IA)", "📋 FICHA TÉCNICA (A
 with tab1:
     st.subheader("Interacción Táctica & Diagnóstico")
     
-    # Historial
     for m in st.session_state.chat:
         with st.chat_message(m["role"]): st.markdown(m["content"])
     
-    # Input de Chat
     if q := st.chat_input("Reporte situación (Ej: Paciente 30 años, caída en el Ávila, fractura expuesta fémur...)"):
         st.session_state.chat.append({"role": "user", "content": q})
         with st.chat_message("user"): st.markdown(q)
@@ -107,10 +106,9 @@ with tab1:
             if client:
                 with st.spinner("Analizando telemetría y protocolos..."):
                     try:
-                        # Preparamos el contenido (Texto + Imagen si existe)
                         contenido = [SYSTEM_PROMPT, q]
                         if img_pil:
-                            contenido.append(img_pil) # Enviamos la foto a la IA
+                            contenido.append(img_pil)
                             contenido.append("Analiza también esta imagen para llenar el MARCH.")
 
                         response = client.models.generate_content(model=MODELO, contents=contenido)
@@ -121,28 +119,18 @@ with tab1:
                         if match:
                             try:
                                 js = json.loads(match.group(1).replace("'", '"'))
-                                
-                                # 1. Llenar Info General
                                 if "info" in js:
                                     for k, v in js["info"].items():
                                         if v and v != "...": st.session_state[k] = v
-                                
-                                # 2. Llenar MARCH
                                 if "march" in js:
                                     for k, v in js["march"].items():
                                         if v and v != "...": st.session_state[k] = v
-                                        
-                                # 3. Farmacología
                                 if "farmaco" in js:
                                     st.session_state["farmaco"] = js.get("farmaco", "")
-                                    
-                                st.toast("✅ TODOS LOS CAMPOS SINCRONIZADOS", icon="🔄")
-                                # Forzamos recarga para que los inputs se vean llenos
-                                # st.rerun()  <-- Descomentar si quieres recarga instantánea (puede cortar la animación del chat)
+                                st.toast("✅ DATOS SINCRONIZADOS", icon="🔄")
                             except Exception as e:
                                 print(f"Error JSON: {e}")
 
-                        # Limpieza y visualización
                         clean_res = re.sub(r"UPDATE_DATA:.*", "", full_res, flags=re.DOTALL)
                         st.markdown(clean_res)
                         st.session_state.chat.append({"role": "assistant", "content": clean_res})
@@ -154,7 +142,6 @@ with tab2:
     st.subheader("Datos de Operación (Autollenado)")
     st.info("Estos campos se llenan solos conversando con la IA o subiendo fotos.")
     
-    # Sección 1: Datos Logísticos
     c1, c2, c3 = st.columns(3)
     st.session_state["operador"] = c1.text_input("Operador APH", st.session_state["operador"])
     st.session_state["ubicacion"] = c2.text_input("Ubicación Geográfica", st.session_state["ubicacion"])
@@ -162,12 +149,17 @@ with tab2:
     
     c4, c5 = st.columns([2, 1])
     st.session_state["paciente"] = c4.text_input("Datos Paciente", st.session_state["paciente"])
-    st.session_state["tipo_incidente"] = c5.selectbox("Tipo Incidente", ["Terrestre", "Aereo", "Nautico"], index=["Terrestre", "Aereo", "Nautico"].index(st.session_state["tipo_incidente"]) if st.session_state["tipo_incidente"] in ["Terrestre", "Aereo", "Nautico"] else 0)
+    
+    # Lógica segura para el Selectbox (evita error si el valor IA no coincide)
+    idx_tipo = 0
+    opts_tipo = ["Terrestre", "Aereo", "Nautico"]
+    if st.session_state["tipo_incidente"] in opts_tipo:
+        idx_tipo = opts_tipo.index(st.session_state["tipo_incidente"])
+    st.session_state["tipo_incidente"] = c5.selectbox("Tipo Incidente", opts_tipo, index=idx_tipo)
 
     st.markdown("---")
     st.subheader("Evaluación Primaria (MARCH)")
     
-    # Sección 2: Protocolo MARCH (Diseño Táctico)
     col_m, col_a, col_r, col_c, col_h = st.columns(5)
     st.session_state["M"] = col_m.text_area("M (Hemorragia)", st.session_state["M"], height=100)
     st.session_state["A"] = col_a.text_area("A (Vía Aérea)", st.session_state["A"], height=100)
@@ -182,9 +174,8 @@ with tab2:
 with tab3:
     st.subheader("Informe Final")
     
-    
-    
     # Generación de Texto para PDF
+    # AQUÍ ESTABA EL ERROR: Ahora {COPYRIGHT} ya existe
     reporte_final = f"""
     {COPYRIGHT}
     ----------------------------------------------------------
@@ -216,7 +207,7 @@ with tab3:
         pdf = FPDF()
         pdf.add_page()
         pdf.set_font("Arial", size=10)
-        # Saneamiento básico de texto para FPDF (latin-1)
+        # Saneamiento de texto para evitar errores de caracteres
         texto_pdf = reporte_final.encode('latin-1', 'replace').decode('latin-1')
         pdf.multi_cell(0, 5, texto_pdf)
         st.download_button("Guardar PDF", data=bytes(pdf.output()), file_name=f"ORH_CASO_{datetime.now().strftime('%H%M')}.pdf")
